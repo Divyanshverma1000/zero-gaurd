@@ -35,6 +35,7 @@ class ZeroGuardCLI:
                 all_latest_states = self.listener.get_all_latest_states()
                 individual_scores = {}
                 
+                # Pre-calculate scores so they are available for the loop
                 for i in range(self.num_drones):
                     history = self.listener.get_drone_history(i)
                     features = self.extractor.extract_features(history)
@@ -44,15 +45,19 @@ class ZeroGuardCLI:
                 trust_scores, status = self.engine.update(individual_scores, cross_val_scores)
                 
                 clear_screen()
-                print("="*65)
-                print(f"{'ZEROGUARD: UAV SWARM TRUST MONITOR':^65}")
-                print("="*65)
-                print(f"{'Drone':<10} | {'Trust Score':<15} | {'Status':<15} | {'Health'}")
-                print("-" * 65)
+                print("="*85)
+                print(f"{'ZEROGUARD: UAV SWARM TRUST MONITOR':^85}")
+                print("="*85)
+                print(f"{'Drone':<10} | {'Trust Score':<15} | {'Status':<15} | {'Data':<10} | {'Health'}")
+                print("-" * 85)
                 
                 for i in range(self.num_drones):
+                    history = self.listener.get_drone_history(i)
+                    has_data = len(history) > 0
+                    
                     score = trust_scores[i]
                     stat = status[i]
+                    
                     # Simple health bar
                     bar_len = int(score / 5)
                     bar = "█" * bar_len + "-" * (20 - bar_len)
@@ -60,9 +65,10 @@ class ZeroGuardCLI:
                     color_code = "\033[92m" if stat == "TRUSTED" else "\033[91m"
                     reset_code = "\033[0m"
                     
-                    print(f"Drone {i+1:<4} | {score:<15.2f} | {color_code}{stat:<15}{reset_code} | [{bar}]")
-                
-                print("-" * 65)
+                    data_flag = "[OK]" if has_data else "[NO DATA]"
+                    data_color = "\033[92m" if has_data else "\033[93m"
+                    
+                    print(f"Drone {i+1:<4} | {score:<15.2f} | {color_code}{stat:<15}{reset_code} | {data_color}{data_flag:<10}{reset_code} | [{bar}]")
                 print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
                 print("[!] Drone 3 is the designated attack target.")
                 print("="*65)
