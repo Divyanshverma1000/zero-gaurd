@@ -72,8 +72,9 @@ class DroneListener:
         return self.latest_state
 
 if __name__ == "__main__":
-    # Test listener - runs on VM with localhost connections
-    conns = ["udp:127.0.0.1:14550", "udp:127.0.0.1:14560", "udp:127.0.0.1:14570"]
+    # Listen on all interfaces (0.0.0.0) to pick up Docker bridge traffic
+    # We use different ports to distinguish drones
+    conns = ["udp:0.0.0.0:14550", "udp:0.0.0.0:14560", "udp:0.0.0.0:14570"]
     listener = DroneListener(conns)
     listener.start()
     try:

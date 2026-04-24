@@ -15,11 +15,11 @@ from trust_engine import TrustEngine
 
 class ZeroGuardDashboard:
     def __init__(self):
-        # Config - runs on VM with localhost connections
+        # Config - Listen on all interfaces for Docker bridge traffic
         self.drone_conns = [
-            "udp:127.0.0.1:14550", 
-            "udp:127.0.0.1:14560", 
-            "udp:127.0.0.1:14570"
+            "udp:0.0.0.0:14550", 
+            "udp:0.0.0.0:14560", 
+            "udp:0.0.0.0:14570"
         ]
         self.num_drones = len(self.drone_conns)
         
