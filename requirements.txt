@@ -1,0 +1,6 @@
+pymavlink
+scikit-learn
+matplotlib
+pandas
+numpy
+joblib
