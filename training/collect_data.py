@@ -13,8 +13,7 @@ def collect_training_data(duration_seconds=300, output_file='data/normal_flight_
     """
     Collects telemetry data from the drones for a specified duration to build a training dataset.
     """
-    vm_ip = "34.61.213.128"
-    conns = [f"udpout:{vm_ip}:14550", f"udpout:{vm_ip}:14560", f"udpout:{vm_ip}:14570"]
+    conns = ["udp:127.0.0.1:14550", "udp:127.0.0.1:14560", "udp:127.0.0.1:14570"]
     
     listener = DroneListener(conns)
     extractor = FeatureExtractor(window_seconds=2.0)

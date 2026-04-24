@@ -15,12 +15,11 @@ from trust_engine import TrustEngine
 
 class ZeroGuardDashboard:
     def __init__(self):
-        # Config
-        self.vm_ip = "34.61.213.128"
+        # Config - runs on VM with localhost connections
         self.drone_conns = [
-            f"udpout:{self.vm_ip}:14550", 
-            f"udpout:{self.vm_ip}:14560", 
-            f"udpout:{self.vm_ip}:14570"
+            "udp:127.0.0.1:14550", 
+            "udp:127.0.0.1:14560", 
+            "udp:127.0.0.1:14570"
         ]
         self.num_drones = len(self.drone_conns)
         

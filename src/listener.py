@@ -72,13 +72,8 @@ class DroneListener:
         return self.latest_state
 
 if __name__ == "__main__":
-    # Test listener
-    vm_ip = "34.61.213.128"
-    conns = [
-        f"udpout:{vm_ip}:14550", 
-        f"udpout:{vm_ip}:14560", 
-        f"udpout:{vm_ip}:14570"
-    ]
+    # Test listener - runs on VM with localhost connections
+    conns = ["udp:127.0.0.1:14550", "udp:127.0.0.1:14560", "udp:127.0.0.1:14570"]
     listener = DroneListener(conns)
     listener.start()
     try:
