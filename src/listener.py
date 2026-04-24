@@ -14,45 +14,53 @@ class DroneListener:
     def _listen_to_drone(self, drone_id, connection_string):
         print(f"[+] Drone {drone_id+1}: Connecting to {connection_string}...")
         try:
+            # Create connection without blocking wait
             master = mavutil.mavlink_connection(connection_string)
-            master.wait_heartbeat()
-            print(f"[+] Drone {drone_id+1}: Heartbeat received")
+            print(f"[+] Drone {drone_id+1}: Connection object created")
         except Exception as e:
             print(f"[!] Drone {drone_id+1}: Connection failed: {e}")
             return
 
         while self.running:
-            msg = master.recv_match(blocking=True, timeout=0.1)
-            if msg:
-                mtype = msg.get_type()
-                now = time.time()
-                
-                # Update current state
-                state = self.latest_state[drone_id]
-                state['time'] = now
+            try:
+                msg = master.recv_match(blocking=False)
+                if msg:
+                    mtype = msg.get_type()
+                    now = time.time()
+                    
+                    if drone_id not in self.latest_state:
+                        self.latest_state[drone_id] = {}
+                    
+                    state = self.latest_state[drone_id]
+                    state['time'] = now
 
-                if mtype == "ATTITUDE":
-                    state["roll"] = msg.roll
-                    state["pitch"] = msg.pitch
-                    state["yaw"] = msg.yaw
-                    state["yawspeed"] = msg.yawspeed
-                elif mtype == "GLOBAL_POSITION_INT":
-                    state["lat"] = msg.lat / 1e7
-                    state["lon"] = msg.lon / 1e7
-                    state["alt"] = msg.alt / 1000
-                    state["vx"] = msg.vx / 100
-                    state["vy"] = msg.vy / 100
-                    state["vz"] = msg.vz / 100
-                elif mtype == "SYS_STATUS":
-                    state["voltage"] = msg.voltage_battery / 1000
-                elif mtype == "HIGHRES_IMU":
-                    state["acc_x"] = msg.xacc
-                    state["acc_y"] = msg.yacc
-                    state["acc_z"] = msg.zacc
+                    if mtype == "ATTITUDE":
+                        state["roll"] = msg.roll
+                        state["pitch"] = msg.pitch
+                        state["yaw"] = msg.yaw
+                        state["yawspeed"] = msg.yawspeed
+                    elif mtype == "GLOBAL_POSITION_INT":
+                        state["lat"] = msg.lat / 1e7
+                        state["lon"] = msg.lon / 1e7
+                        state["alt"] = msg.alt / 1000
+                        state["vx"] = msg.vx / 100
+                        state["vy"] = msg.vy / 100
+                        state["vz"] = msg.vz / 100
+                    elif mtype == "SYS_STATUS":
+                        state["voltage"] = msg.voltage_battery / 1000
+                    elif mtype == "HIGHRES_IMU":
+                        state["acc_x"] = msg.xacc
+                        state["acc_y"] = msg.yacc
+                        state["acc_z"] = msg.zacc
 
-                # Append to history
-                if state:
-                    self.drones_data[drone_id].append(dict(state))
+                    # Append to history
+                    if state:
+                        self.drones_data[drone_id].append(dict(state))
+                else:
+                    time.sleep(0.01) # Low latency wait
+            except Exception as e:
+                print(f"[!] Error on Drone {drone_id+1}: {e}")
+                time.sleep(1)
 
     def start(self):
         for i, conn in enumerate(self.connection_strings):
@@ -62,8 +70,6 @@ class DroneListener:
 
     def stop(self):
         self.running = False
-        for t in self.threads:
-            t.join()
 
     def get_drone_history(self, drone_id):
         return list(self.drones_data[drone_id])
@@ -72,8 +78,7 @@ class DroneListener:
         return self.latest_state
 
 if __name__ == "__main__":
-    # Listen on all interfaces (0.0.0.0) to pick up Docker bridge traffic
-    # We use different ports to distinguish drones
+    # Use 0.0.0.0 to receive bridged traffic from all interfaces
     conns = ["udp:0.0.0.0:14550", "udp:0.0.0.0:14560", "udp:0.0.0.0:14570"]
     listener = DroneListener(conns)
     listener.start()
