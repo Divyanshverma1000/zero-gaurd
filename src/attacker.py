@@ -11,13 +11,9 @@ class DroneAttacker:
 
     def trigger_gps_spoofing(self, lat_offset=0.01, lon_offset=0.01, alt_offset=10):
         print(f"[ATTACK] Drone {self.drone_id}: Triggering GPS Spoofing...")
-        payload = {
-            "lat_offset": lat_offset,
-            "lon_offset": lon_offset,
-            "alt_offset": alt_offset
-        }
+        payload = {"lat_offset": lat_offset, "lon_offset": lon_offset, "alt_offset": alt_offset}
         try:
-            response = requests.post(f"{self.base_url}/stage1", data=payload, timeout=5)
+            response = requests.post(f"{self.base_url}/stage1", data=payload, timeout=10)
             print(f"[ATTACK] GPS Spoofing sent - Status: {response.status_code}")
             return True
         except Exception as e:
@@ -26,13 +22,9 @@ class DroneAttacker:
 
     def trigger_attitude_spoofing(self, roll_offset=30, pitch_offset=20, yaw_offset=45):
         print(f"[ATTACK] Drone {self.drone_id}: Triggering Attitude Spoofing...")
-        payload = {
-            "roll_offset": roll_offset,
-            "pitch_offset": pitch_offset,
-            "yaw_offset": yaw_offset
-        }
+        payload = {"roll_offset": roll_offset, "pitch_offset": pitch_offset, "yaw_offset": yaw_offset}
         try:
-            response = requests.post(f"{self.base_url}/stage2", data=payload, timeout=5)
+            response = requests.post(f"{self.base_url}/stage2", data=payload, timeout=10)
             print(f"[ATTACK] Attitude Spoofing sent - Status: {response.status_code}")
             return True
         except Exception as e:
