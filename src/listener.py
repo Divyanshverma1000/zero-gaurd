@@ -78,8 +78,8 @@ class DroneListener:
         return self.latest_state
 
 if __name__ == "__main__":
-    # Use 0.0.0.0 to receive bridged traffic from all interfaces
-    conns = ["udp:0.0.0.0:14550", "udp:0.0.0.0:14560", "udp:0.0.0.0:14570"]
+    # Listen ONLY on 127.0.0.1 to avoid conflict with the Bridge
+    conns = ["udp:127.0.0.1:14550", "udp:127.0.0.1:14560", "udp:127.0.0.1:14570"]
     listener = DroneListener(conns)
     listener.start()
     try:

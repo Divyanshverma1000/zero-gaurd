@@ -3,7 +3,7 @@ import time
 import argparse
 
 class DroneAttacker:
-    def __init__(self, vm_ip="34.61.213.128", drone_id=3):
+    def __init__(self, vm_ip="127.0.0.1", drone_id=3):
         self.vm_ip = vm_ip
         self.drone_id = drone_id
         self.ui_port = 8000 + (drone_id - 1) # Drone 3 -> port 8002
@@ -96,7 +96,7 @@ def run_demo(attacker_vm_ip="34.61.213.128"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ZeroGuard Attack Simulator")
-    parser.add_argument("--vm-ip", default="34.61.213.128", help="GCP VM IP address")
+    parser.add_argument("--vm-ip", default="127.0.0.1", help="GCP VM IP address")
     parser.add_argument("--drone-id", type=int, default=3, help="Target drone ID (1-3)")
     parser.add_argument("--attack", choices=["gps", "attitude", "waypoint", "all"], default="all", help="Attack type to run")
     args = parser.parse_args()
