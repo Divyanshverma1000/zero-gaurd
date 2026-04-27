@@ -1,77 +1,42 @@
 import socket
-import struct
+import sys
 
-def start_raw_bridge():
-    # We use AF_PACKET to sniff at the link layer (Linux only)
-    # ETH_P_IP = 0x0800
+def start_drone1_bridge():
+    # Target: Drone 1 Gateway IP on the simulator bridge
+    GATEWAY_IP = "10.13.0.1"
+    MAV_PORT = 14550
+    
+    # Create the listener socket
     try:
-        sniffer = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0800))
-    except PermissionError:
-        print("[!] Error: Raw sockets require root. Run with sudo.")
-        return
+        # We bind to the gateway IP to catch traffic routed through the bridge
+        listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen_sock.bind((GATEWAY_IP, MAV_PORT))
     except Exception as e:
-        print(f"[!] Error: {e}")
+        print(f"[!] Error: Could not bind to {GATEWAY_IP}:{MAV_PORT}. {e}")
         return
 
-    # Output socket to forward to ZeroGuard
-    out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # Create the forwarder socket
+    forward_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
     print("="*60)
-    print("ZEROGUARD RAW SNIFFER BRIDGE ACTIVE")
+    print("ZEROGUARD: DRONE 1 FOCUS BRIDGE")
     print("="*60)
-    print("[+] Sniffing all bridge traffic for MAVLink (Port 14550)...")
-    
-    counts = {0: 0, 1: 0, 2: 0}
-    last_print = 0
+    print(f"[+] Listening on Gateway: {GATEWAY_IP}:{MAV_PORT}")
+    print(f"[+] Forwarding to: 127.0.0.1:14550")
+    print("="*60)
 
+    count = 0
     try:
         while True:
-            raw_data, addr = sniffer.recvfrom(65535)
-            
-            # Ethernet header is 14 bytes, IP header is at least 20 bytes
-            # UDP header is 8 bytes. UDP Port 14550 is 0x38D6
-            
-            # Basic IP header check
-            ip_header = raw_data[14:34]
-            iph = struct.unpack('!BBHHHBBH4s4s', ip_header)
-            protocol = iph[6]
-            
-            if protocol == 17: # UDP
-                u = raw_data[34:42]
-                udp_header = struct.unpack('!HHHH', u)
-                src_port = udp_header[0]
-                dst_port = udp_header[1]
-                
-                if dst_port == 14550:
-                    src_ip = socket.inet_ntoa(iph[8])
-                    data = raw_data[42:] # UDP Payload
-                    
-                    # Route based on source subnet
-                    target_port = None
-                    drone_idx = None
-                    
-                    if src_ip.startswith("10.13."):
-                        target_port = 14550
-                        drone_idx = 0
-                    elif src_ip.startswith("10.14."):
-                        target_port = 14560
-                        drone_idx = 1
-                    elif src_ip.startswith("10.15."):
-                        target_port = 14570
-                        drone_idx = 2
-                    
-                    if target_port:
-                        out_sock.sendto(data, ("127.0.0.1", target_port))
-                        counts[drone_idx] += 1
-            
-            # Print status every 2 seconds
-            if time.time() - last_print > 2:
-                print(f"[STATUS] Packets caught: D1: {counts[0]}, D2: {counts[1]}, D3: {counts[2]}", end='\r')
-                last_print = time.time()
-
+            data, addr = listen_sock.recvfrom(4096)
+            # Forward everything to ZeroGuard
+            forward_sock.sendto(data, ("127.0.0.1", 14550))
+            count += 1
+            if count % 10 == 0:
+                print(f"[OK] Forwarded {count} packets from Drone 1", end='\r')
     except KeyboardInterrupt:
-        print("\n[!] Stopping Raw Bridge.")
+        print("\n[!] Stopping Drone 1 Bridge.")
 
 if __name__ == "__main__":
-    import time
-    start_raw_bridge()
+    start_drone1_bridge()
