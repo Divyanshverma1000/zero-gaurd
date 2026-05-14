@@ -1,186 +1,101 @@
-# ZeroGuard — A Zero Trust Intrusion Detection System for UAV Swarms
+# ZeroGuard — Zero Trust Drone Security System
 
-## Overview
-
-ZeroGuard is a real-time intrusion detection system designed for UAV swarms. It monitors drone telemetry, detects anomalous behavior, and isolates compromised drones using a combination of machine learning and cross-drone validation.
-
-The system follows a Zero Trust approach, meaning no drone is trusted by default. Each drone is continuously evaluated based on its own behavior and its consistency with the rest of the swarm.
-
----
-
-## System Architecture
-
-### Swarm Layer (Cloud)
-
-The system uses three UAVs simulated using DVDrone SITL, running as Docker containers on a cloud virtual machine. Each drone operates independently and continuously sends MAVLink telemetry data.
-
----
-
-### Listener Layer (Local)
-
-A Python-based listener connects to all drones simultaneously and collects telemetry data at regular intervals. The data is stored in sliding window buffers for each drone.
-
----
-
-### Feature Extraction
-
-At fixed intervals, the system computes a set of features from telemetry data, including:
-
-* Yaw rate
-* GPS discontinuity (position jumps)
-* Altitude rate
-* Velocity magnitude
-* Acceleration and velocity consistency
-* Battery voltage changes
-
-These features represent the behavioral state of each drone.
-
----
-
-### Machine Learning Model
-
-An Isolation Forest model is trained on normal flight data. During operation, it assigns an anomaly score to each drone based on its behavior.
-
-Scores close to zero indicate normal behavior, while lower scores indicate anomalies.
-
----
-
-### Cross-Drone Validation
-
-The system compares drones against each other to check consistency in their reported states. If one drone significantly disagrees with others in terms of position or motion, it is considered suspicious.
-
-This enables detection of compromised drones even if their individual behavior appears normal.
-
----
-
-### Trust Score Engine
-
-A final trust score is computed for each drone by combining:
-
-* The anomaly score from the machine learning model
-* The consistency score from cross-drone validation
-
-Based on this score, each drone is classified as:
-
-* Trusted
-* Suspicious
-* Quarantined
-
----
-
-### Dashboard
-
-A live dashboard displays:
-
-* Trust scores of all drones
-* Current status of each drone
-* Time-series graph of trust scores
-* Detection events
-
----
-
-## Project Structure
+## Architecture
 
 ```
-zeroguard/
-├── cloud/
-│   └── docker-compose-swarm.yml
-├── data/
-│   ├── normal/
-│   └── attacks/
-├── model/
-│   └── isolation_forest.pkl
-├── src/
-│   ├── listener.py
-│   ├── feature_extractor.py
-│   ├── scorer.py
-│   ├── cross_validator.py
-│   ├── trust_engine.py
-│   └── dashboard.py
-├── training/
-│   └── train_model.py
-├── evaluation/
-│   └── run_experiments.py
-└── README.md
+[Drone 1] ArduCopter → MAVLink → port 14550 ─┐
+[Drone 2] ArduCopter → MAVLink → port 14560 ──┼─→ listener.py → detector.py → cli_dashboard.py
+[Drone 3] ArduCopter → MAVLink → port 14570 ─┘
+```
+
+## Detection
+
+- **Rule-based**: GPS jump, altitude spike, yaw rate, voltage drop, battery drop
+- **ML**: Isolation Forest trained live on first 60 samples per drone
+- **Zero Trust**: trust score starts at 100%, drops on anomaly, drone quarantined at <35%
+
+---
+
+## Setup & Run (2-hour presentation flow)
+
+### Step 1 — Start Docker containers
+
+```bash
+cd ~/drone1 && docker compose -f docker-compose-lite.yaml up -d
+cd ~/drone2 && docker compose -f docker-compose-lite.yaml up -d
+```
+
+### Step 2 — Start Drone 1 via web UI
+
+Open http://localhost:8000 → click through Stage 1 → Stage 2 → drone flies
+
+### Step 3 — Start Drone 2 (and optionally Drone 3)
+
+```bash
+cd ~ && bash zero-gaurd/start_drones.sh
+```
+
+### Step 4 — Verify both drones sending telemetry
+
+```bash
+python3 ~/multi_listner.py
+# Should show drone1 and drone2 logging rows
+# Ctrl+C after confirming
+```
+
+### Step 5 — Open CLI Dashboard (Terminal 1)
+
+```bash
+cd ~/zero-gaurd/src
+python3 cli_dashboard.py
+```
+
+Wait ~60 seconds — ML model will train automatically per drone.
+
+---
+
+## Attacks (run in separate terminals)
+
+### GPS Spoofing — attack drone 2
+```bash
+cd ~/zero-gaurd/src
+python3 attack_gps_spoof.py 2
+```
+
+### Battery Spoofing — attack drone 1
+```bash
+cd ~/zero-gaurd/src
+python3 attack_battery_spoof.py 1
+```
+
+### GPS Spoofing — attack drone 1 (classic demo)
+```bash
+cd ~/zero-gaurd/src
+python3 attack_gps_spoof.py 1
 ```
 
 ---
 
-## How It Works
+## Expected Dashboard Behavior
 
-1. Drones send telemetry data continuously.
-2. The listener collects and buffers this data.
-3. Features are extracted from recent telemetry.
-4. The machine learning model assigns anomaly scores.
-5. The cross-validator checks consistency across drones.
-6. A final trust score is computed.
-7. Drones are labeled and displayed on the dashboard.
-8. If a drone is compromised, it is detected and isolated.
-
----
-
-## Running the Project
-
-Start the swarm on the cloud:
-
-```
-cd cloud
-docker-compose -f docker-compose-swarm.yml up
-```
-
-Run the local system with the new CLI dashboard:
-
-```
-python src/cli_dashboard.py
-```
-
-If you want the legacy detector view, you can still run:
-
-```
-python src/detector.py
-```
+| Time      | Event                                      |
+|-----------|--------------------------------------------|
+| 0–60s     | ML training, trust at 100%                 |
+| Attack    | GPS_JUMP / VOLT_DROP flags appear          |
+| ~5–10s    | Trust drops to SUSPICIOUS (yellow)         |
+| ~15–20s   | Trust drops to QUARANTINED (red)           |
+| Stop atk  | Trust slowly recovers                      |
 
 ---
 
-## Training
+## File Reference
 
-To train the model on normal flight data:
-
-```
-python training/train_model.py
-```
-
----
-
-## Evaluation
-
-To run experiments and generate metrics:
-
-```
-python evaluation/run_experiments.py
-```
-
----
-
-## Key Features
-
-* Real-time intrusion detection
-* Behavioral analysis of UAV telemetry
-* Cross-drone validation for Zero Trust enforcement
-* Lightweight machine learning model
-* Live monitoring dashboard
-
----
-
-## Future Improvements
-
-* Support for larger swarm sizes
-* Deployment on real UAV hardware
-* Edge deployment capabilities
-* Integration of advanced models
-
----
-
-## Summary
-
-ZeroGuard provides a practical approach to securing UAV swarms by combining real-time anomaly detection with cross-drone validation. It ensures that compromised drones can be detected and isolated without relying on prior trust assumptions.
+| File                     | Purpose                              |
+|--------------------------|--------------------------------------|
+| `src/listener.py`        | Multi-drone MAVLink listener         |
+| `src/detector.py`        | Rule-based + Isolation Forest        |
+| `src/cli_dashboard.py`   | Full-screen terminal dashboard       |
+| `src/attack_gps_spoof.py`    | GPS coordinate injection attack  |
+| `src/attack_battery_spoof.py`| Battery/voltage drop attack      |
+| `start_drones.sh`        | One-shot drone 2/3 startup script    |
+| `multi_listner.py`       | Standalone telemetry logger (CSV)    |

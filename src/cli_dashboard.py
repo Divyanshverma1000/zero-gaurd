@@ -1,144 +1,149 @@
-import os
-import sys
-import time
-import threading
-import collections
-import queue
+"""
+ZeroGuard CLI Dashboard
+Full-screen terminal dashboard — one panel per drone.
+Shows telemetry, trust score, trend sparkline, and alert history.
+"""
+import os, sys, time, threading, collections, queue
+sys.path.insert(0, os.path.dirname(__file__))
 
 from detector import ZeroGuardDetector
-from listener import listen, telemetry_queue
+from listener import DroneListener, DRONES
 
 if os.name == 'nt':
-    # Windows may require ANSI support for colors.
-    os.system('')
+    os.system('')   # enable ANSI on Windows
 
+# ── ANSI helpers ─────────────────────────────────────────────────────────────
+def clr(text, code): return f"\033[{code}m{text}\033[0m"
+RED, YLW, GRN, CYN, BLD = '91', '93', '92', '96', '1'
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+def bar(score, width=36):
+    filled = max(0, min(width, int(score / 100 * width)))
+    b = "█" * filled + "░" * (width - filled)
+    if score >= 70:  return clr(b, GRN)
+    if score >= 35:  return clr(b, YLW)
+    return clr(b, RED)
 
-
-def format_bar(score, width=30):
-    filled = max(0, min(width, int(score / 100.0 * width)))
-    return "█" * filled + "░" * (width - filled)
-
-
-def color_text(text, color_code):
-    return f"\033[{color_code}m{text}\033[0m"
-
-
-def format_sparkline(values):
+def spark(values):
     blocks = "▁▂▃▄▅▆▇█"
-    if not values:
-        return ""
-    min_v = min(values)
-    max_v = max(values)
-    if abs(max_v - min_v) < 1e-6:
-        return blocks[0] * len(values)
-    scaled = [int((v - min_v) / (max_v - min_v) * (len(blocks) - 1)) for v in values]
-    return "".join(blocks[i] for i in scaled)
+    if not values: return ""
+    lo, hi = min(values), max(values)
+    if abs(hi - lo) < 1e-6: return blocks[0] * len(values)
+    return "".join(blocks[int((v-lo)/(hi-lo)*(len(blocks)-1))] for v in values)
 
+def status_str(s, score):
+    if s == "TRUSTED":      return clr(f"✅ TRUSTED      ", GRN)
+    if s == "SUSPICIOUS":   return clr(f"⚠️  SUSPICIOUS   ", YLW)
+    return                         clr(f"🚫 QUARANTINED  ", RED)
 
+# ── Dashboard ────────────────────────────────────────────────────────────────
 class ZeroGuardCLI:
+    W = 100   # terminal width
+
     def __init__(self):
-        self.detector = ZeroGuardDetector(drone_id=1)
-        self.alert_history = collections.deque(maxlen=8)
-        self.latest_snap = None
-        self.score_history = collections.deque([100.0] * 30, maxlen=30)
-        self.running = False
-        self.listener_thread = None
+        self.listener   = DroneListener(quiet=True)
+        self.detectors  = {d["drone_id"]: ZeroGuardDetector(drone_id=d["drone_id"])
+                           for d in DRONES}
+        self.snaps      = {d["drone_id"]: None for d in DRONES}
+        self.score_hist = {d["drone_id"]: collections.deque([100.0]*40, maxlen=40)
+                           for d in DRONES}
+        self.alerts     = collections.deque(maxlen=20)
+        self.running    = False
 
     def start(self):
         self.running = True
-        self.listener_thread = threading.Thread(target=listen, kwargs={'quiet': True}, daemon=True)
-        self.listener_thread.start()
-
+        self.listener.start()
         try:
             while self.running:
-                self._consume_telemetry()
-                self._render_dashboard()
+                self._drain_queue()
+                self._render()
                 time.sleep(0.25)
         except KeyboardInterrupt:
             self.running = False
+        finally:
             print("\n[!] ZeroGuard Monitor stopped.")
 
-    def _consume_telemetry(self):
+    def _drain_queue(self):
+        q = self.listener.telemetry_queue
         while True:
             try:
-                snap = telemetry_queue.get_nowait()
+                snap = q.get_nowait()
             except queue.Empty:
                 break
+            did = snap.get("drone_id", 1)
+            if did not in self.detectors:
+                continue
+            result = self.detectors[did].analyze(snap, emit_logs=False)
+            if result:
+                self.snaps[did] = snap
+                self.score_hist[did].append(self.detectors[did].trust_score)
+                for flag in result["flags"]:
+                    self.alerts.appendleft(
+                        f"[{time.strftime('%H:%M:%S')}] Drone {did}: {flag}")
 
-            output = self.detector.analyze(snap, emit_logs=False)
-            if output:
-                self.latest_snap = snap
-                self.score_history.append(self.detector.trust_score)
-                if output['flags']:
-                    for flag in output['flags']:
-                        self.alert_history.appendleft(flag)
+    def _render(self):
+        os.system('cls' if os.name == 'nt' else 'clear')
+        W = self.W
+        print(clr("=" * W, CYN))
+        print(clr(" ZEROGUARD — ZERO TRUST DRONE SECURITY MONITOR ".center(W, "="), CYN))
+        print(clr("=" * W, CYN))
 
-    def _render_dashboard(self):
-        clear_screen()
-        header = " ZEROGUARD CLI DASHBOARD "
-        print("=" * 84)
-        print(header.center(84, "="))
-        print("=" * 84)
+        active = 0
+        for d in DRONES:
+            did   = d["drone_id"]
+            det   = self.detectors[did]
+            snap  = self.snaps[did]
+            score = det.trust_score
+            hist  = list(self.score_hist[did])
 
-        if self.latest_snap is None:
-            print("Waiting for telemetry from Drone 1...\n")
+            print(clr(f"  DRONE {did}".ljust(W//2) +
+                      f"Port: 1455{did-1}".rjust(W//2 - 2), BLD))
+
+            if snap:
+                active += 1
+                age = time.time() - snap["ts"]
+                vel = (snap["vx"]**2 + snap["vy"]**2 + snap["vz"]**2)**0.5
+                print(f"  Lat: {snap['lat']:>12.6f}  Lon: {snap['lon']:>13.6f}"
+                      f"  Alt: {snap['alt']:>7.1f}m  Vel: {vel:>5.2f}m/s")
+                print(f"  Volt: {snap['voltage']:>5.2f}V"
+                      f"  Batt: {snap['battery_remaining']:>3}%"
+                      f"  Sats: {snap['satellites']:>2}"
+                      f"  Age: {age:>4.1f}s")
+            else:
+                print(clr("  ⏳ Waiting for telemetry…", YLW))
+                print()
+
+            print(f"  Trust: {score:>5.1f}%  {status_str(det.status, score)}"
+                  f"  [{bar(score, 36)}]")
+            print(f"  Trend: {spark(hist)}")
+
+            n_alerts = len(det.alerts)
+            if n_alerts:
+                last = det.alerts[-1]
+                print(clr(f"  Alerts: {n_alerts}  Last: {last}", YLW if det.status != "QUARANTINED" else RED))
+            else:
+                print(clr("  Alerts: 0  — No anomalies detected", GRN))
+
+            print(clr("─" * W, '90'))
+
+        # ── Alert log ──────────────────────────────────────────────────────
+        total = sum(len(d.alerts) for d in self.detectors.values())
+        print(clr(f"  ALERT LOG  (total: {total})".ljust(W), BLD))
+        if self.alerts:
+            for i, a in enumerate(list(self.alerts)[:8], 1):
+                col = RED if "QUARANTINE" in a or "GPS_JUMP" in a or "VOLT" in a else YLW
+                print(clr(f"  {i:>2}. {a}", col))
         else:
-            age = time.time() - self.latest_snap['ts']
-            print(f"Drone:     1")
-            print(f"Latitude:  {self.latest_snap['lat']:>10.6f}")
-            print(f"Longitude: {self.latest_snap['lon']:>11.6f}")
-            print(f"Altitude:  {self.latest_snap['alt']:>7.1f} m")
-            print(f"Voltage:   {self.latest_snap['voltage']:>5.2f} V")
-            print(f"Age:       {age:>5.2f} sec")
-            print()
+            print(clr("  No alerts fired yet. System nominal.", GRN))
 
-        score = self.detector.trust_score
-        status = self.detector.status
-        bar = format_bar(score, width=40)
-        status_colored = status
-        if status == 'TRUSTED':
-            status_colored = color_text(status, '92')
-        elif status == 'SUSPICIOUS':
-            status_colored = color_text(status, '93')
-        else:
-            status_colored = color_text(status, '91')
-
-        alert_summary = self.alert_history[0] if self.alert_history else "No alerts yet"
-        trend = format_sparkline(list(self.score_history))
-        recent_alerts = list(self.alert_history)[:4]
-
-        print(f"Trust score:  {score:>5.1f}%  {status_colored}")
-        print(f"[{bar}]")
-        print(f"Trend: {trend}")
-        print("-" * 84)
-
-        print(f"Alerts fired: {len(self.detector.alerts)}")
-        print(f"Last alert: {alert_summary}")
-        print("Recent alert history:")
-        if recent_alerts:
-            for idx, alert in enumerate(recent_alerts, start=1):
-                print(f" {idx:>2}. {alert}")
-        else:
-            print("  No alerts detected yet.")
-
-        print("-" * 84)
-        if status == 'QUARANTINED':
-            print(color_text("🚨 DRONE 1 QUARANTINED — GPS SPOOFING DETECTED", '41;97'))
-            print(color_text("   Please stop the attack and watch the recovery process.", '97'))
-        elif status == 'SUSPICIOUS':
-            print(color_text("⚠️  Drone 1 is suspicious. Anomaly detected.", '93'))
-            print(color_text("   Continue the attack to demonstrate false-positive resistance.", '97'))
-        else:
-            print(color_text("✅ Drone 1 is trusted. No active attack detected.", '92'))
-
-        print("=" * 84)
-        print("Demo command: run attack in second terminal; this screen shows the status.")
-        print("Press Ctrl+C to exit.")
+        print(clr("=" * W, CYN))
+        ml_status = " | ".join(
+            f"Drone{did}: {'ML✓' if det.ml_ready else f'ML({len(det.sample_buf)} samples)'}"
+            for did, det in self.detectors.items())
+        print(f"  {ml_status}")
+        print(f"  Active drones: {active}/{len(DRONES)}   "
+              f"Run attack script in another terminal to see detection.")
+        print(clr("  Press Ctrl+C to exit.", '90'))
 
 
 if __name__ == '__main__':
-    dashboard = ZeroGuardCLI()
-    dashboard.start()
+    ZeroGuardCLI().start()
