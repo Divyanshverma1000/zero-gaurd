@@ -38,19 +38,25 @@ class ZeroGuardDetector:
         self.status = "TRUSTED"
         self.window = collections.deque(maxlen=20)  # last 20 samples
 
-    def analyze(self, snap):
+    def analyze(self, snap, emit_logs=True):
         if snap["lat"] == 0.0 or snap["ts"] is None:
-            return
+            return None
 
         self.window.append(snap)
 
         if self.prev is None:
             self.prev = snap
-            return
+            return {
+                'snap': snap,
+                'flags': [],
+                'trust_score': self.trust_score,
+                'status': self.status,
+                'bar': self._build_trust_bar(),
+            }
 
         dt = snap["ts"] - self.prev["ts"]
         if dt <= 0:
-            return
+            return None
 
         flags = []
 
@@ -94,13 +100,31 @@ class ZeroGuardDetector:
         else:
             self.status = "QUARANTINED"
 
-        # ── Print ─────────────────────────────────────────────────────────
-        bar = "█" * int(self.trust_score / 5) + "░" * (20 - int(self.trust_score / 5))
+        output = {
+            'snap': snap,
+            'flags': flags,
+            'trust_score': self.trust_score,
+            'status': self.status,
+            'bar': self._build_trust_bar(),
+        }
+
+        if emit_logs:
+            self._display_output(output)
+
+        self.prev = snap
+        return output
+
+    def _build_trust_bar(self):
+        return "█" * int(self.trust_score / 5) + "░" * (20 - int(self.trust_score / 5))
+
+    def _display_output(self, output):
+        snap = output['snap']
+        bar = output['bar']
         status_color = {
-            "TRUSTED":     "\033[92m",   # green
-            "SUSPICIOUS":  "\033[93m",   # yellow
-            "QUARANTINED": "\033[91m",   # red
-        }[self.status]
+            "TRUSTED":     "\033[92m",
+            "SUSPICIOUS":  "\033[93m",
+            "QUARANTINED": "\033[91m",
+        }[output['status']]
         reset = "\033[0m"
 
         print(f"\r[Drone {self.drone_id}] "
@@ -109,17 +133,15 @@ class ZeroGuardDetector:
               f"Trust [{bar}] {self.trust_score:>5.1f}% "
               f"{status_color}{self.status}{reset}    ", end="", flush=True)
 
-        if flags:
-            print()  # newline before alerts
-            for f in flags:
+        if output['flags']:
+            print()
+            for f in output['flags']:
                 self.alerts.append(f)
                 print(f"  ⚠️  ALERT Drone {self.drone_id}: {f}")
             if self.status == "QUARANTINED":
                 print(f"\n{'='*60}")
                 print(f"  🚨 DRONE {self.drone_id} QUARANTINED — GPS SPOOFING DETECTED")
                 print(f"{'='*60}\n")
-
-        self.prev = snap
 
 
 def run():

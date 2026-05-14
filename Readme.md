@@ -128,11 +128,16 @@ cd cloud
 docker-compose -f docker-compose-swarm.yml up
 ```
 
-Run the local system:
+Run the local system with the new CLI dashboard:
 
 ```
-python src/listener.py
-python src/dashboard.py
+python src/cli_dashboard.py
+```
+
+If you want the legacy detector view, you can still run:
+
+```
+python src/detector.py
 ```
 
 ---

@@ -27,12 +27,14 @@ state = {
     "cpu_load": 0, "comm_drop": 0,
 }
 
-def listen(port=DRONE1_PORT):
+def listen(port=DRONE1_PORT, quiet=False):
     global state
-    print(f"[Listener] Connecting udpin:{HOST}:{port}")
+    if not quiet:
+        print(f"[Listener] Connecting udpin:{HOST}:{port}")
     master = mavutil.mavlink_connection(f"udpin:{HOST}:{port}")
     master.wait_heartbeat()
-    print(f"[Listener] Heartbeat received — drone online")
+    if not quiet:
+        print(f"[Listener] Heartbeat received — drone online")
 
     while True:
         msg = master.recv_match(blocking=True, timeout=1)

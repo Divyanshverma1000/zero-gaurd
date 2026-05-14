@@ -1,83 +1,119 @@
-import time
 import os
 import sys
-from listener import DroneListener
-from feature_extractor import FeatureExtractor
-from scorer import Scorer
-from cross_validator import CrossValidator
-from trust_engine import TrustEngine
+import time
+import threading
+import collections
+import queue
+
+from detector import ZeroGuardDetector
+from listener import listen, telemetry_queue
+
+if os.name == 'nt':
+    # Windows may require ANSI support for colors.
+    os.system('')
+
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+
+def format_bar(score, width=30):
+    filled = max(0, min(width, int(score / 100.0 * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def color_text(text, color_code):
+    return f"\033[{color_code}m{text}\033[0m"
+
+
 class ZeroGuardCLI:
     def __init__(self):
-        self.drone_conns = ["udp:127.0.0.1:14550", "udp:127.0.0.1:14560", "udp:127.0.0.1:14570"]
-        self.num_drones = len(self.drone_conns)
-        
-        self.listener = DroneListener(self.drone_conns)
-        self.extractor = FeatureExtractor(window_seconds=2.0)
-        
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model_path = os.path.join(base_dir, 'model', 'isolation_forest.joblib')
-        self.scorer = Scorer(model_path)
-        
-        self.validator = CrossValidator()
-        self.engine = TrustEngine(num_drones=self.num_drones)
+        self.detector = ZeroGuardDetector(drone_id=1)
+        self.alert_history = collections.deque(maxlen=8)
+        self.latest_snap = None
+        self.running = False
+        self.listener_thread = None
 
     def start(self):
-        print("[+] Starting ZeroGuard CLI Monitor...")
-        self.listener.start()
-        time.sleep(2)
-        
+        self.running = True
+        self.listener_thread = threading.Thread(target=listen, kwargs={'quiet': True}, daemon=True)
+        self.listener_thread.start()
+
         try:
-            while True:
-                all_latest_states = self.listener.get_all_latest_states()
-                individual_scores = {}
-                
-                # Pre-calculate scores so they are available for the loop
-                for i in range(self.num_drones):
-                    history = self.listener.get_drone_history(i)
-                    features = self.extractor.extract_features(history)
-                    individual_scores[i] = self.scorer.score(features) if features else 1.0
-
-                cross_val_scores = self.validator.validate(all_latest_states)
-                trust_scores, status = self.engine.update(individual_scores, cross_val_scores)
-                
-                clear_screen()
-                print("="*85)
-                print(f"{'ZEROGUARD: UAV SWARM TRUST MONITOR':^85}")
-                print("="*85)
-                print(f"{'Drone':<10} | {'Trust Score':<15} | {'Status':<15} | {'Data':<10} | {'Health'}")
-                print("-" * 85)
-                
-                for i in range(self.num_drones):
-                    history = self.listener.get_drone_history(i)
-                    has_data = len(history) > 0
-                    
-                    score = trust_scores[i]
-                    stat = status[i]
-                    
-                    # Simple health bar
-                    bar_len = int(score / 5)
-                    bar = "█" * bar_len + "-" * (20 - bar_len)
-                    
-                    color_code = "\033[92m" if stat == "TRUSTED" else "\033[91m"
-                    reset_code = "\033[0m"
-                    
-                    data_flag = "[OK]" if has_data else "[NO DATA]"
-                    data_color = "\033[92m" if has_data else "\033[93m"
-                    
-                    print(f"Drone {i+1:<4} | {score:<15.2f} | {color_code}{stat:<15}{reset_code} | {data_color}{data_flag:<10}{reset_code} | [{bar}]")
-                print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                print("[!] Drone 3 is the designated attack target.")
-                print("="*65)
-                
-                time.sleep(0.5)
+            while self.running:
+                self._consume_telemetry()
+                self._render_dashboard()
+                time.sleep(0.25)
         except KeyboardInterrupt:
-            self.listener.stop()
-            print("\n[!] ZeroGuard Monitor Stopped.")
+            self.running = False
+            print("\n[!] ZeroGuard Monitor stopped.")
 
-if __name__ == "__main__":
-    monitor = ZeroGuardCLI()
-    monitor.start()
+    def _consume_telemetry(self):
+        while True:
+            try:
+                snap = telemetry_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            output = self.detector.analyze(snap, emit_logs=False)
+            if output:
+                self.latest_snap = snap
+                for flag in output['flags']:
+                    self.alert_history.appendleft(flag)
+
+    def _render_dashboard(self):
+        clear_screen()
+        header = " ZEROGUARD CLI DASHBOARD "
+        print("=" * 84)
+        print(header.center(84, "="))
+        print("=" * 84)
+
+        if self.latest_snap is None:
+            print("Waiting for telemetry from Drone 1...\n")
+        else:
+            age = time.time() - self.latest_snap['ts']
+            print(f"Drone:     1")
+            print(f"Latitude:  {self.latest_snap['lat']:>10.6f}")
+            print(f"Longitude: {self.latest_snap['lon']:>11.6f}")
+            print(f"Altitude:  {self.latest_snap['alt']:>7.1f} m")
+            print(f"Voltage:   {self.latest_snap['voltage']:>5.2f} V")
+            print(f"Age:       {age:>5.2f} sec")
+            print()
+
+        score = self.detector.trust_score
+        status = self.detector.status
+        bar = format_bar(score, width=30)
+        status_colored = status
+        if status == 'TRUSTED':
+            status_colored = color_text(status, '92')
+        elif status == 'SUSPICIOUS':
+            status_colored = color_text(status, '93')
+        else:
+            status_colored = color_text(status, '91')
+
+        print(f"Trust score:  {score:>5.1f}%  {status_colored}")
+        print(f"[{bar}]")
+        print("-" * 84)
+
+        print("Recent alerts:")
+        if self.alert_history:
+            for idx, alert in enumerate(self.alert_history, start=1):
+                print(f" {idx:>2}. {alert}")
+        else:
+            print("  No alerts detected yet.")
+
+        print("-" * 84)
+        if status == 'QUARANTINED':
+            print(color_text("🚨 DRONE 1 QUARANTINED — GPS SPOOFING DETECTED", '41;97'))
+        elif status == 'SUSPICIOUS':
+            print(color_text("⚠️  Drone 1 is suspicious. Monitor closely.", '93'))
+        else:
+            print(color_text("✅ Drone 1 is trusted.", '92'))
+
+        print("=" * 84)
+        print("Press Ctrl+C to exit. The dashboard refreshes automatically.")
+
+
+if __name__ == '__main__':
+    dashboard = ZeroGuardCLI()
+    dashboard.start()
